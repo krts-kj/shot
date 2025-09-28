@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>モバイル対応シューティング</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+body{margin:0;background:#111;overflow:hidden;font-family:sans-serif}
+canvas{display:block;margin:auto;background:#111}
+#startBtn{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);padding:15px 30px;font-size:20px;background:lime;color:#000;border:none;border-radius:8px;cursor:pointer;display:none;}
+</style>
+</head>
+<body>
+<canvas id="gameCanvas" width="480" height="640"></canvas>
+<button id="startBtn">START</button>
+<script>
+const canvas=document.getElementById('gameCanvas');
+const ctx=canvas.getContext('2d');
+const startBtn=document.getElementById('startBtn');
+
+let keys={},touchX=0,touchY=0,touchDown=false;
+document.addEventListener('keydown',e=>keys[e.key]=true);
+document.addEventListener('keyup',e=>keys[e.key]=false);
+
+canvas.addEventListener('touchstart',e=>{touchDown=true; touchX=e.touches[0].clientX; touchY=e.touches[0].clientY; e.preventDefault();});
+canvas.addEventListener('touchmove',e=>{touchX=e.touches[0].clientX; touchY=e.touches[0].clientY; e.preventDefault();});
+canvas.addEventListener('touchend',e=>{touchDown=false; e.preventDefault();});
+
+let frameCount=0,score=0,gameOver=true,difficulty=1,enemySpawnInterval=60;
+
+// プレイヤー
+const player={
+  x:canvas.width/2,
+  y:canvas.height-60,
+  speed:5,
+  bullets:[],
+  options:[],
+  maxOptions:6,
+  shield:0,
+  attack:1,
+  pattern:'straight'
+};
+
+const BELL_TYPES={YELLOW:'yellow',GREEN:'green',BLUE:'blue',RED:'red',ORANGE:'orange'};
+const bells=[];
+const enemies=[];
+const enemyBullets=[];
+
+// 初期化関数
+function initGame(){
+  player.x=canvas.width/2; player.y=canvas.height-60;
+  player.bullets=[]; player.options=[]; player.shield=0; player.attack=1; player.pattern='straight';
+  bells.length=0; enemies.length=0; enemyBullets.length=0;
+  score=0; frameCount=0; difficulty=1; enemySpawnInterval=60;
+  gameOver=false;
+  startBtn.style.display='none';
+}
+
+// プレイヤー攻撃
+function shoot(){
+  const bulletsToAdd=[];
+  if(player.pattern==='straight'){
+    bulletsToAdd.push({x:player.x,y:player.y-10,dx:0,dy:-6,atk:player.attack});
+    player.options.forEach(opt=>bulletsToAdd.push({x:opt.x,y:opt.y-10,dx:0,dy:-6,atk:player.attack}));
+  } else if(player.pattern==='spread'){
+    bulletsToAdd.push({x:player.x,y:player.y-10,dx:-1,dy:-5,atk:player.attack});
+    bulletsToAdd.push({x:player.x,y:player.y-10,dx:0,dy:-5,atk:player.attack});
+    bulletsToAdd.push({x:player.x,y:player.y-10,dx:1,dy:-5,atk:player.attack});
+    player.options.forEach(opt=>{
+      bulletsToAdd.push({x:opt.x,y:opt.y-10,dx:-1,dy:-5,atk:player.attack});
+      bulletsToAdd.push({x:opt.x,y:opt.y-10,dx:0,dy:-5,atk:player.attack});
+      bulletsToAdd.push({x:opt.x,y:opt.y-10,dx:1,dy:-5,atk:player.attack});
+    });
+  }
+  player.bullets.push(...bulletsToAdd);
+}
+
+// 仲間追加
+function addOption(){ if(player.options.length<player.maxOptions) player.options.push({}); }
+
+// ベル取得
+function collectBell(bell){
+  switch(bell.type){
+    case BELL_TYPES.GREEN:addOption();break;
+    case BELL_TYPES.BLUE:player.shield=600;break;
+    case BELL_TYPES.YELLOW:score+=1000;break;
+    case BELL_TYPES.RED:player.attack+=1;break;
+    case BELL_TYPES.ORANGE:player.pattern='spread';break;
+  }
+}
+
+// 敵生成
+function spawnEnemy(){
+  const sizeArr=[{size:20,hp:1},{size:35,hp:3},{size:50,hp:5}];
+  const type=sizeArr[Math.floor(Math.random()*sizeArr.length)];
+  const enemyHp=Math.floor(type.hp + difficulty); // 難易度でHP増加
+  enemies.push({
+    x:Math.random()*(canvas.width-type.size)+type.size/2,
+    y:-type.size,
+    dy:1+Math.random()*2,
+    size:type.size,
+    hp:enemyHp,
+    shootTimer:Math.floor(Math.random()*120)
+  });
+}
+
+// ベル生成
+function spawnBell(){
+  const types=[BELL_TYPES.YELLOW,BELL_TYPES.GREEN,BELL_TYPES.BLUE,BELL_TYPES.RED,BELL_TYPES.ORANGE];
+  bells.push({x:Math.random()*460+10,y:-10,dy:1,type:types[Math.floor(Math.random()*types.length)]});
+}
+
+// 更新
+function update(){
+  if(gameOver) return;
+
+  // プレイヤー移動
+  if(keys['ArrowLeft']||keys['a']||touchDown && touchX<canvas.width/2) player.x-=player.speed;
+  if(keys['ArrowRight']||keys['d']||touchDown && touchX>canvas.width/2) player.x+=player.speed;
+  if(keys['ArrowUp']||keys['w']) player.y-=player.speed;
+  if(keys['ArrowDown']||keys['s']) player.y+=player.speed;
+
+  if(player.x<20) player.x=20;
+  if(player.x>canvas.width-20) player.x=canvas.width-20;
+  if(player.y<20) player.y=20;
+  if(player.y>canvas.height-20) player.y=canvas.height-20;
+
+  if((keys[' ']||keys['z']||keys['x']||touchDown) && frameCount%10===0) shoot();
+
+  // 弾更新
+  player.bullets.forEach(b=>{ b.x+=b.dx; b.y+=b.dy; });
+  player.bullets=player.bullets.filter(b=>b.y>-10 && b.x>0 && b.x<canvas.width);
+
+  // 仲間追従
+  player.options.forEach((opt,i)=>{
+    const offset=(i-(player.options.length-1)/2)*30;
+    opt.x=player.x+offset;
+    opt.y=player.y-30;
+  });
+
+  // 敵移動＆攻撃
+  enemies.forEach((e,i)=>{
+    e.y+=e.dy;
+    e.shootTimer--;
+    if(e.shootTimer<=0){
+      enemyBullets.push({x:e.x,y:e.y,dx:0,dy:3});
+      e.shootTimer=120-Math.min(80,difficulty*2);
+    }
+    // 弾との衝突
+    player.bullets.forEach((b,j)=>{
+      if(Math.abs(b.x-e.x)<e.size/2 && Math.abs(b.y-e.y)<e.size/2){
+        e.hp-=b.atk; player.bullets.splice(j,1);
+        if(e.hp<=0){ enemies.splice(i,1); score+=100*difficulty; }
+      }
+    });
+    // プレイヤー衝突
+    if(Math.abs(player.x-e.x)<e.size/2 && Math.abs(player.y-e.y)<e.size/2){
+      gameOver=true; startBtn.style.display='block';
+    }
+  });
+
+  // 敵弾更新＆衝突
+  enemyBullets.forEach((b,i)=>{
+    b.x+=b.dx; b.y+=b.dy;
+    if(Math.abs(player.x-b.x)<10 && Math.abs(player.y-b.y)<10){ gameOver=true; startBtn.style.display='block'; }
+  });
+  enemyBullets.filter(b=>b.y<canvas.height+10);
+
+  // ベル取得
+  bells.forEach((b,i)=>{
+    b.y+=b.dy;
+    if(Math.abs(player.x-b.x)<15 && Math.abs(player.y-b.y)<15){
+      collectBell(b); bells.splice(i,1);
+    }
+  });
+
+  // 難易度上昇
+  if(frameCount%600===0){
+    difficulty+=0.2;
+    enemySpawnInterval=Math.min(120,enemySpawnInterval+5); // 出現間隔を徐々に増やす
+  }
+
+  // 敵生成
+  if(frameCount % enemySpawnInterval === 0) spawnEnemy();
+  // ベル生成
+  if(frameCount % 500 === 0) spawnBell();
+
+  frameCount++;
+}
+
+// 描画
+function draw(){
+  ctx.fillStyle="#111"; ctx.fillRect(0,0,canvas.width,canvas.height);
+  // プレイヤー
+  ctx.fillStyle="lime"; ctx.fillRect(player.x-10,player.y-10,20,20);
+  if(player.shield>0){ ctx.beginPath(); ctx.arc(player.x,player.y,30,0,Math.PI*2); ctx.strokeStyle="cyan"; ctx.lineWidth=3; ctx.stroke(); player.shield--; }
+  // 仲間
+  ctx.fillStyle="lightgreen"; player.options.forEach(opt=>ctx.fillRect(opt.x-8,opt.y-8,16,16));
+  // 弾
+  ctx.fillStyle="white"; player.bullets.forEach(b=>ctx.fillRect(b.x-2,b.y-5,4,10));
+  // 敵
+  ctx.fillStyle="red"; enemies.forEach(e=>ctx.fillRect(e.x-e.size/2,e.y-e.size/2,e.size,e.size));
+  // 敵弾
+  ctx.fillStyle="orange"; enemyBullets.forEach(b=>ctx.fillRect(b.x-2,b.y-5,4,10));
+  // ベル
+  bells.forEach(b=>{ ctx.fillStyle=b.type===BELL_TYPES.GREEN?'green':b.type===BELL_TYPES.BLUE?'cyan':b.type===BELL_TYPES.RED?'red':b.type===BELL_TYPES.ORANGE?'orange':'yellow'; ctx.beginPath(); ctx.arc(b.x,b.y,10,0,Math.PI*2); ctx.fill(); });
+  // スコア＆攻撃力
+  ctx.fillStyle="white"; ctx.font="16px sans-serif";
+  ctx.fillText("SCORE:"+Math.floor(score),10,20);
+  ctx.fillText("ATK:"+player.attack,10,40);
+}
+
+// メインループ
+function loop(){ update(); draw(); if(!gameOver) requestAnimationFrame(loop); }
+
+startBtn.addEventListener('click',()=>{ initGame(); loop(); });
+startBtn.style.display='block';
+</script>
+</body>
+</html>
